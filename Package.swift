@@ -26,12 +26,15 @@ let package = Package(
             .product(name: "EverscaleSdkSwift", package: "everscale-sdk-swift"),
             .product(name: "BigInt", package: "BigInt"),
             .product(name: "SwiftExtensionsPack", package: "swift-extensions-pack")
+        ], plugins: [
+            .plugin(name: "GitVersionPlugin")
         ]),
         .testTarget(name: "OpenEverTests", dependencies: [
             "OpenEver",
             .product(name: "adnl-swift", package: "adnl-swift"),
             .product(name: "NIOCore", package: "swift-nio"),
             .product(name: "NIOPosix", package: "swift-nio")
-        ])
+        ]),
+        .plugin(name: "GitVersionPlugin", capability: .buildTool())
     ]
 )

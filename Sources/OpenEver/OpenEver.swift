@@ -6,7 +6,7 @@ struct OpenEver: AsyncParsableCommand {
         commandName: "openever",
         abstract: "Everscale command-line tools.",
         discussion: "Use --config before or after subcommands. Run 'openever help config' to manage configuration and 'openever help liteclient' for connection options.",
-        version: "0.1.0",
+        version: BuildVersion.value,
         subcommands: [ConfigCommand.self, LiteClientCommand.self, WalletCommand.self]
     )
     @OptionGroup var configurationOptions: ConfigurationOptions
