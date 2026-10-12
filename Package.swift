@@ -2,18 +2,20 @@
 import PackageDescription
 
 let package = Package(
-    name: "OpenEver",
+    name: "openever",
     platforms: [.macOS(.v13)],
-    products: [.executable(name: "openever", targets: ["OpenEver"])],
+    products: [
+        .executable(name: "openever", targets: ["OpenEver"])
+    ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser", from: "1.8.2"),
-        .package(path: "../ever-liteclient-swift"),
-        .package(path: "../ever-tl-swift"),
-        .package(path: "../everscale-sdk-swift"),
-        .package(path: "../adnl-swift"),
+        .package(url: "https://github.com/open-ever/ever-liteclient-swift", from: "1.0.0"),
+        .package(url: "https://github.com/open-ever/ever-tl-swift", from: "1.0.0"),
+        .package(url: "https://github.com/nerzh/adnl-swift", from: "1.1.1"),
+        .package(url: "https://github.com/open-ever/everscale-sdk-swift", from: "1.0.0"),
+        .package(url: "https://github.com/nerzh/swift-extensions-pack", from: "2.10.0"),
         .package(url: "https://github.com/bytehubio/BigInt", from: "6.0.1"),
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.98.0"),
-        .package(url: "https://github.com/nerzh/swift-extensions-pack", from: "2.10.0")
     ],
     targets: [
         .executableTarget(name: "OpenEver", dependencies: [
