@@ -8,9 +8,11 @@ import SwiftExtensionsPack
 struct WalletCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "wallet", abstract: "Generate wallet keys and use Everscale wallets.",
-        subcommands: [WalletSeedCommand.self, WalletKeysCommand.self, PWV2Command.self]
+        discussion: "Uses PreprocessedWalletV2 by default. Connection options may appear before or after the operation. Address generation works offline.",
+        subcommands: [WalletSeedCommand.self, WalletKeysCommand.self]
+            + PWV2Command.configuration.subcommands + [PWV2Command.self]
     )
-    @OptionGroup var configurationOptions: ConfigurationOptions
+    @OptionGroup var connection: ConnectionOptions
 }
 
 struct PWV2Command: AsyncParsableCommand {

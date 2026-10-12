@@ -12,8 +12,8 @@ import adnl_swift
 
 @Suite(.timeLimit(.minutes(1)))
 struct CommandIntegrationTests {
-    @Test(arguments: [false, true])
-    func walletTransfersFetchStateAndSubmitSignedMessages(_ active: Bool) async throws {
+    @Test(arguments: [false, true], [[], ["pwv2"], ["preprocessedWalletV2"]])
+    func walletTransfersFetchStateAndSubmitSignedMessages(_ active: Bool, _ walletType: [String]) async throws {
         let pair = SEPCrypto.Ed25519.createKeyPair(seed32Byte: Data(repeating: 1, count: 32))
         let wallet = try PWV2(publicKey: pair.public, workchain: -1)
         let seqno: UInt16 = active ? 37 : 0
@@ -32,7 +32,7 @@ struct CommandIntegrationTests {
         let result = try await withCLI(arguments: [
             "send", "--keys", keyJSON, "--w", "-1", "--destination", "0:\(String(repeating: "1", count: 64))",
             "--ever", "1,45"
-        ], commandPath: ["wallet", "preprocessedWalletV2"]) { body in
+        ], commandPath: ["wallet"] + walletType) { body in
             var reader = TLReader(data: body)
             if try reader.read(UInt32.self, boxed: false) == LiteServerGetAccountStateRequest.constructorID {
                 let request = try TLCodec.decode(LiteServerGetAccountStateRequest.self, from: body)
@@ -63,9 +63,10 @@ struct CommandIntegrationTests {
         #expect(json["account"] as? String == wallet.address.toString())
     }
 
-    @Test func walletBalanceHandlesAbsentAccounts() async throws {
+    @Test(arguments: [[], ["pwv2"], ["preprocessedWalletV2"]])
+    func walletBalanceHandlesAbsentAccounts(_ walletType: [String]) async throws {
         let result = try await withCLI(arguments: ["balance", "--account", "-1:\(String(repeating: "0", count: 64))"],
-                                       commandPath: ["wallet", "pwv2"]) { body in
+                                       commandPath: ["wallet"] + walletType) { body in
             let request = try TLCodec.decode(LiteServerGetAccountStateRequest.self, from: body)
             #expect(request.account.workchain == -1)
             let id = TonNodeBlockIdExtConstructor(workchain: -1, shard: Int64.min, seqno: 55,
@@ -225,7 +226,7 @@ private func withCLI(arguments: [String], stdin: Data? = nil, connectionSource: 
         process.executableURL = root.appendingPathComponent(".build/debug/openever")
         process.currentDirectoryURL = directory
         var environment = ProcessInfo.processInfo.environment
-        for name in ["OPENEVER_LITE_HOST", "OPENEVER_LITE_PORT", "OPENEVER_LITE_PUBLIC_KEY", "OpenEver_CONFIG"] {
+        for name in ["OPENEVER_LITE_HOST", "OPENEVER_LITE_PORT", "OPENEVER_LITE_PUBLIC_KEY", "OPENEVER_CONFIG"] {
             environment.removeValue(forKey: name)
         }
         let key = "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c"
@@ -240,14 +241,14 @@ private func withCLI(arguments: [String], stdin: Data? = nil, connectionSource: 
             """
             let fileName = connectionSource == .defaultConfiguration ? "openever.json" : "custom.json"
             try Data(json.utf8).write(to: directory.appendingPathComponent(fileName))
-            if connectionSource == .environmentConfiguration { environment["OpenEver_CONFIG"] = fileName }
+            if connectionSource == .environmentConfiguration { environment["OPENEVER_CONFIG"] = fileName }
             if [.explicitConfiguration, .rootConfiguration, .liteClientConfiguration].contains(connectionSource) {
                 switch connectionSource {
                 case .rootConfiguration: rootArguments = ["--config", fileName]
                 case .liteClientConfiguration: liteClientArguments = ["--config", fileName]
                 default: connectionArguments = ["--config", fileName]
                 }
-                environment["OpenEver_CONFIG"] = "missing.json"
+                environment["OPENEVER_CONFIG"] = "missing.json"
             }
         }
         process.environment = environment

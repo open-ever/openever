@@ -16,19 +16,20 @@ struct WalletCLITests {
     private var keysJSON: String { "{\"privatKey\":\"\(privateKey)\",\"publicKey\":\"\(publicKey)\"}" }
     private var destination: String { "-1:" + String(repeating: "11", count: 32) }
 
-    @Test(arguments: ["pwv2", "preprocessedWalletV2"])
-    func walletCommandsAndAliasesParse(_ alias: String) async throws {
+    @Test(arguments: [[], ["pwv2"], ["preprocessedWalletV2"]])
+    func walletCommandsAndAliasesParse(_ walletType: [String]) async throws {
+        let commandPath = ["wallet"] + walletType
         #expect(try await OpenEver.asyncParseAsRoot(["wallet", "seed"]) is WalletSeedCommand)
         #expect(try await OpenEver.asyncParseAsRoot(["wallet", "keys"]) is WalletKeysCommand)
         let address = try #require(try await OpenEver.asyncParseAsRoot(
-            ["wallet", alias, "address", "--keys", keysJSON]
+            commandPath + ["address", "--keys", keysJSON]
         ) as? PWV2AddressCommand)
         #expect(address.chain.workchain == 0)
         #expect(try await OpenEver.asyncParseAsRoot(
-            ["wallet", alias, "balance", "--account", destination]
+            commandPath + ["balance", "--account", destination]
         ) is PWV2BalanceCommand)
         let send = try #require(try await OpenEver.asyncParseAsRoot(
-            ["wallet", alias, "send", "--keys", keysJSON, "--dest", destination, "--ever", "1,45"]
+            commandPath + ["send", "--keys", keysJSON, "--dest", destination, "--ever", "1,45"]
         ) as? PWV2SendCommand)
         #expect(try send.amount() == 1_450_000_000)
         #expect(send.flag == 3)
@@ -53,11 +54,11 @@ struct WalletCLITests {
         }
     }
 
-    @Test(arguments: ["pwv2", "preprocessedWalletV2"], [-1, 0])
-    func seedAddressMatchesKeysAndSupportsOutput(_ alias: String, _ workchain: Int) async throws {
-        var command = try #require(try await OpenEver.asyncParseAsRoot([
-            "wallet", alias, "address", "--seed", mnemonic, "--workchain", String(workchain), "--out", "address"
-        ]) as? PWV2AddressCommand)
+    @Test(arguments: [[], ["pwv2"], ["preprocessedWalletV2"]], [-1, 0])
+    func seedAddressMatchesKeysAndSupportsOutput(_ walletType: [String], _ workchain: Int) async throws {
+        var command = try #require(try await OpenEver.asyncParseAsRoot(
+            ["wallet"] + walletType + ["address", "--seed", mnemonic, "--workchain", String(workchain), "--out", "address"]
+        ) as? PWV2AddressCommand)
         #expect(command.out == "address")
         try withWalletDirectory { directory in
             let seedPath = directory.appendingPathComponent("from-seed").path
@@ -110,13 +111,16 @@ struct WalletCLITests {
         }
     }
 
-    @Test(arguments: [0, 1, 2, 3])
-    func configIsAcceptedAtEachWalletCommandLevel(_ level: Int) async throws {
-        var arguments = ["wallet", "pwv2", "send", "--keys", keysJSON, "--destination", destination, "--nanoEver", "42"]
-        arguments.insert(contentsOf: ["--config", "selected.json"], at: level)
-        let command = try #require(try await OpenEver.asyncParseAsRoot(arguments) as? PWV2SendCommand)
-        #expect(command.connection.config == "selected.json")
-        #expect(try command.amount() == 42)
+    @Test(arguments: [[], ["pwv2"], ["preprocessedWalletV2"]])
+    func configIsAcceptedAtEachWalletCommandLevel(_ walletType: [String]) async throws {
+        let commandPath = ["wallet"] + walletType + ["send"]
+        for level in 0...commandPath.count {
+            var arguments = commandPath + ["--keys", keysJSON, "--destination", destination, "--nanoEver", "42"]
+            arguments.insert(contentsOf: ["--config", "selected.json"], at: level)
+            let command = try #require(try await OpenEver.asyncParseAsRoot(arguments) as? PWV2SendCommand)
+            #expect(command.connection.config == "selected.json")
+            #expect(try command.amount() == 42)
+        }
     }
 
     @Test(arguments: [false, true], [false, true])

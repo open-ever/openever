@@ -4,8 +4,12 @@ import EverscaleSdkSwift
 import SwiftExtensionsPack
 #if canImport(Darwin)
 import Darwin
-#else
+#elseif canImport(Glibc)
 import Glibc
+#elseif canImport(Musl)
+import Musl
+#else
+#error("Unsupported C runtime")
 #endif
 
 struct WalletKeys: Codable, Equatable {

@@ -2,12 +2,6 @@ import ArgumentParser
 import Foundation
 import EverLiteClient
 
-struct ConfigurationOptions: ParsableArguments {
-    @Option(help: ArgumentHelp("JSON configuration path: --config overrides OpenEver_CONFIG, then ./openever.json. May appear before or after subcommands.",
-                               valueName: "path"))
-    var config: String?
-}
-
 struct ConnectionOptions: ParsableArguments {
     @OptionGroup var configuration: ConfigurationOptions
     @Option(name: [.customLong("host"), .customLong("ip")],
@@ -40,13 +34,10 @@ struct ConnectionOptions: ParsableArguments {
 
     func resolvedServer(environment: [String: String] = ProcessInfo.processInfo.environment,
                         directory: URL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)) throws -> LiteServer {
-        let environmentConfig = environment["OpenEver_CONFIG"].flatMap { $0.isEmpty ? nil : $0 }
-        let selectedConfig = config ?? environmentConfig
-        guard selectedConfig != "-" else { throw ValidationError("The configuration requires a file path; stdin is reserved for binary input.") }
-        let configURL = URL(fileURLWithPath: selectedConfig ?? "openever.json", relativeTo: directory)
+        let configURL = try configuration.resolvedFile(environment: environment, directory: directory)
         let needsDefaults = host == nil || port == nil || publicKey == nil
         var defaults: OpenEverConfiguration.Connection?
-        if selectedConfig != nil || (needsDefaults && FileManager.default.fileExists(atPath: configURL.path)) {
+        if let configURL, needsDefaults || configuration.hasExplicitPath(environment: environment) {
             let decoded: OpenEverConfiguration
             do { decoded = try JSONDecoder().decode(OpenEverConfiguration.self, from: Input.file(configURL.path)) }
             catch { throw ValidationError("Cannot load configuration '\(configURL.path)': \(error)") }
@@ -66,15 +57,11 @@ struct ConnectionOptions: ParsableArguments {
         } else if serverIndex != 0 {
             throw ValidationError("--server-index requires a global-config liteservers array.")
         }
-        let resolvedHost = host ?? defaults?.ip ?? environment["OPENEVER_LITE_HOST"]
-        let resolvedKey = publicKey ?? defaults?.publicKey ?? environment["OPENEVER_LITE_PUBLIC_KEY"]
-        var resolvedPort = port ?? defaults?.port
-        if resolvedPort == nil, let text = environment["OPENEVER_LITE_PORT"] {
-            guard let number = Int(text) else { throw ValidationError("OPENEVER_LITE_PORT must be an integer.") }
-            resolvedPort = number
-        }
+        let resolvedHost = host ?? defaults?.ip
+        let resolvedKey = publicKey ?? defaults?.publicKey
+        let resolvedPort = port ?? defaults?.port
         guard let resolvedHost, let resolvedPort, let resolvedKey else {
-            throw ValidationError("Set liteclient.ip, liteclient.port and liteclient.publicKey in '\(configURL.path)', or provide --ip/--host, --port and --public-key (or their OPENEVER_LITE_* environment variables).")
+            throw ValidationError("Set liteclient.ip, liteclient.port and liteclient.publicKey in the configuration (--config, OPENEVER_CONFIG or ./openever.json), or provide --ip/--host, --port and --public-key.")
         }
         return try LiteServer(host: resolvedHost, port: resolvedPort, publicKey: Input.hash(resolvedKey).data)
     }
@@ -93,18 +80,20 @@ struct ConnectionOptions: ParsableArguments {
     }
 }
 
-struct OpenEverConfiguration: Decodable {
+struct OpenEverConfiguration: Codable {
     let liteclient: Connection?
     let liteservers: [Server]?
 
-    struct Connection: Decodable {
+    static let empty = OpenEverConfiguration(liteclient: Connection(ip: "", port: 0, publicKey: ""), liteservers: nil)
+
+    struct Connection: Codable {
         let ip: String?
         let port: Int?
         let publicKey: String?
     }
 
-    struct Server: Decodable {
-        struct Key: Decodable {
+    struct Server: Codable {
+        struct Key: Codable {
             let type: String?
             let key: String
             enum CodingKeys: String, CodingKey { case type = "@type", key }

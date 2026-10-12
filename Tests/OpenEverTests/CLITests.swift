@@ -17,10 +17,11 @@ struct CLITests {
         let rootHelp = OpenEver.helpMessage()
         let liteHelp = OpenEver.helpMessage(for: LiteClientCommand.self)
         let queryHelp = OpenEver.helpMessage(for: QueryCommand.self)
-        for help in [rootHelp, liteHelp, queryHelp] {
+        let configHelp = OpenEver.helpMessage(for: ConfigCommand.self)
+        for help in [rootHelp, liteHelp, queryHelp, configHelp] {
             let options = help.components(separatedBy: "OPTIONS:").last ?? ""
             #expect(options.contains("--config <path>"))
-            #expect(options.contains("OpenEver_CONFIG"))
+            #expect(options.contains("OPENEVER_CONFIG"))
             #expect(options.contains("./openever.json"))
         }
         for help in [liteHelp, queryHelp] {
@@ -30,6 +31,9 @@ struct CLITests {
             #expect(options.contains("--public-key"))
         }
         #expect(liteHelp.contains("after liteclient or after its operation"))
+        for option in ["--read", "--create", "--path", "--out"] {
+            #expect(configHelp.contains(option))
+        }
     }
 
     @Test(arguments: [0, 1, 2])
@@ -178,7 +182,7 @@ struct CLITests {
         #expect(throws: (any Error).self) { try BinaryInputOptions.parse(["--input-hex", "00"]).boc() }
     }
 
-    @Test func connectionEnvironmentAndExplicitOverrides() throws {
+    @Test func legacyConnectionEnvironmentIsIgnored() throws {
         let directory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let settings = try ConnectionOptions.parse(connectionArguments)
         let server = try settings.resolvedServer(environment: ["OPENEVER_LITE_HOST": "wrong", "OPENEVER_LITE_PORT": "invalid"], directory: directory)
@@ -188,10 +192,11 @@ struct CLITests {
         environmentOnly.host = nil
         environmentOnly.port = nil
         environmentOnly.publicKey = nil
-        let fallback = try environmentOnly.resolvedServer(environment: ["OPENEVER_LITE_HOST": "127.0.0.1",
-                                                                       "OPENEVER_LITE_PORT": "1234",
-                                                                       "OPENEVER_LITE_PUBLIC_KEY": serverKey], directory: directory)
-        #expect(fallback.port == 1234)
+        #expect(throws: (any Error).self) {
+            try environmentOnly.resolvedServer(environment: ["OPENEVER_LITE_HOST": "127.0.0.1",
+                                                             "OPENEVER_LITE_PORT": "1234",
+                                                             "OPENEVER_LITE_PUBLIC_KEY": serverKey], directory: directory)
+        }
         environmentOnly.serverIndex = 1
         #expect(throws: (any Error).self) { try environmentOnly.resolvedServer(environment: [:], directory: directory) }
     }
@@ -220,7 +225,7 @@ struct CLITests {
         }
     }
 
-    @Test func partialConfigurationFallsBackToEnvironment() throws {
+    @Test func partialConfigurationRequiresCommandLineOverrides() throws {
         try withConfiguration("""
         {"liteclient":{"ip":null,"port":3030,"publicKey":null}}
         """) { directory in
@@ -228,9 +233,12 @@ struct CLITests {
             settings.host = nil
             settings.port = nil
             settings.publicKey = nil
-            let server = try settings.resolvedServer(environment: ["OPENEVER_LITE_HOST": "127.0.0.1",
-                                                                   "OPENEVER_LITE_PORT": "invalid",
-                                                                   "OPENEVER_LITE_PUBLIC_KEY": serverKey], directory: directory)
+            let environment = ["OPENEVER_LITE_HOST": "127.0.0.1", "OPENEVER_LITE_PORT": "1234",
+                               "OPENEVER_LITE_PUBLIC_KEY": serverKey]
+            #expect(throws: (any Error).self) { try settings.resolvedServer(environment: environment, directory: directory) }
+            settings.host = "127.0.0.1"
+            settings.publicKey = serverKey
+            let server = try settings.resolvedServer(environment: environment, directory: directory)
             #expect(server.host == "127.0.0.1")
             #expect(server.port == 3030)
             #expect(server.publicKey == (try Input.hash(serverKey)).data)
@@ -289,19 +297,117 @@ struct CLITests {
             settings.host = nil
             settings.port = nil
             settings.publicKey = nil
-            let fromEnvironment = try settings.resolvedServer(environment: ["OpenEver_CONFIG": environmentPath.path], directory: directory)
+            let fromEnvironment = try settings.resolvedServer(environment: ["OPENEVER_CONFIG": environmentPath.path], directory: directory)
             #expect(fromEnvironment.host == "192.0.2.2")
             #expect(fromEnvironment.port == 5522)
-            #expect(try settings.resolvedServer(environment: ["OpenEver_CONFIG": "custom.json"], directory: directory) == fromEnvironment)
-            #expect(try settings.resolvedServer(environment: ["OpenEver_CONFIG": ""], directory: directory).host == "192.0.2.1")
+            #expect(try settings.resolvedServer(environment: ["OPENEVER_CONFIG": "custom.json"], directory: directory) == fromEnvironment)
+            #expect(try settings.resolvedServer(environment: ["OPENEVER_CONFIG": ""], directory: directory).host == "192.0.2.1")
+            #expect(try settings.resolvedServer(environment: ["OpenEver_CONFIG": "missing.json"], directory: directory).host == "192.0.2.1")
             #expect(throws: (any Error).self) {
-                try settings.resolvedServer(environment: ["OpenEver_CONFIG": "missing.json"], directory: directory)
+                try settings.resolvedServer(environment: ["OPENEVER_CONFIG": "missing.json"], directory: directory)
             }
             settings.config = "openever.json"
-            let fromCommandLine = try settings.resolvedServer(environment: ["OpenEver_CONFIG": "missing.json"], directory: directory)
+            let fromCommandLine = try settings.resolvedServer(environment: ["OPENEVER_CONFIG": "missing.json"], directory: directory)
             #expect(fromCommandLine.host == "192.0.2.1")
             #expect(fromCommandLine.port == 3030)
         }
+    }
+
+    @Test(arguments: ["--read", "--path"])
+    func configCommandsUseTheSamePathPriority(_ mode: String) throws {
+        let defaultContents = "{\"liteclient\":{\"ip\":\"192.0.2.1\"}}"
+        try withConfiguration(defaultContents) { directory in
+            let defaultFile = directory.appendingPathComponent("openever.json")
+            let environmentFile = directory.appendingPathComponent("environment.json")
+            let explicitFile = directory.appendingPathComponent("explicit.json")
+            let environmentContents = "{\"liteclient\":{\"ip\":\"192.0.2.2\"}}\n"
+            let explicitContents = "{\"liteclient\":{\"ip\":\"192.0.2.3\"}}\n"
+            try Data(environmentContents.utf8).write(to: environmentFile)
+            try Data(explicitContents.utf8).write(to: explicitFile)
+            let cases: [([String], [String: String], URL, String)] = [
+                (["config", mode], [:], defaultFile, defaultContents),
+                (["config", mode], ["OPENEVER_CONFIG": ""], defaultFile, defaultContents),
+                (["config", mode], ["OpenEver_CONFIG": "missing.json"], defaultFile, defaultContents),
+                (["config", mode], ["OPENEVER_CONFIG": "environment.json"], environmentFile, environmentContents),
+                (["config", mode], ["OPENEVER_CONFIG": environmentFile.path], environmentFile, environmentContents),
+                (["--config", "explicit.json", "config", mode], ["OPENEVER_CONFIG": "environment.json"], explicitFile, explicitContents),
+                (["config", mode, "--config", "./explicit.json"], ["OPENEVER_CONFIG": "missing.json"], explicitFile, explicitContents)
+            ]
+            for (arguments, environment, file, contents) in cases {
+                let result = try runConfigCLI(arguments, directory: directory, environment: environment)
+                #expect(result.status == 0, Comment(rawValue: result.error))
+                #expect(result.error.isEmpty)
+                #expect(result.output == Data((mode == "--path" ? file.path + "\n" : contents).utf8))
+            }
+        }
+    }
+
+    @Test(arguments: ["--read", "--path"])
+    func configCommandsReportMissingFilesWithoutFallingBack(_ mode: String) throws {
+        try withConfiguration("{}") { directory in
+            for (arguments, environment) in [
+                (["config", mode], ["OPENEVER_CONFIG": "missing.json"]),
+                (["config", mode, "--config", "missing.json"], ["OPENEVER_CONFIG": "openever.json"]),
+                (["config", mode, "--config", "."], [:])
+            ] {
+                let result = try runConfigCLI(arguments, directory: directory, environment: environment)
+                #expect(result.status != 0)
+                #expect(result.output.isEmpty)
+                #expect(result.error.contains("Configuration not found"))
+            }
+            let emptyDirectory = directory.appendingPathComponent("empty", isDirectory: true)
+            try FileManager.default.createDirectory(at: emptyDirectory, withIntermediateDirectories: false)
+            let result = try runConfigCLI(["config", mode], directory: emptyDirectory)
+            #expect(result.status != 0)
+            #expect(result.output.isEmpty)
+            #expect(result.error.contains("Configuration not found"))
+        }
+    }
+
+    @Test func configReadAndPathDoNotRequireValidJSON() throws {
+        try withConfiguration("{") { directory in
+            let read = try runConfigCLI(["config", "--read"], directory: directory)
+            #expect(read.status == 0)
+            #expect(read.output == Data("{".utf8))
+            let path = try runConfigCLI(["config", "--path"], directory: directory)
+            #expect(path.status == 0)
+            #expect(path.output == Data((directory.appendingPathComponent("openever.json").path + "\n").utf8))
+        }
+    }
+
+    @Test func configTemplateUsesEmptyFieldsAndSupportsFileOutput() throws {
+        try withConfiguration("{\"liteclient\":{\"ip\":\"192.0.2.1\"}}") { directory in
+            let printed = try runConfigCLI(["config", "--create"], directory: directory,
+                                           environment: ["OPENEVER_CONFIG": "missing.json"])
+            #expect(printed.status == 0, Comment(rawValue: printed.error))
+            let template = try JSONDecoder().decode(OpenEverConfiguration.self, from: printed.output)
+            #expect(template.liteclient?.ip == "")
+            #expect(template.liteclient?.port == 0)
+            #expect(template.liteclient?.publicKey == "")
+            #expect(template.liteservers == nil)
+            #expect(printed.output.last == 10)
+            let stdout = try runConfigCLI(["config", "--create", "--out", "-"], directory: directory)
+            #expect(stdout.status == 0)
+            #expect(stdout.output == printed.output)
+            let written = try runConfigCLI(["config", "--create", "--out", "./template.json"], directory: directory)
+            #expect(written.status == 0, Comment(rawValue: written.error))
+            #expect(written.output.isEmpty)
+            let templateFile = directory.appendingPathComponent("template.json")
+            #expect(try Data(contentsOf: templateFile) == printed.output)
+            let repeated = try runConfigCLI(["config", "--create", "--out", "./template.json"], directory: directory)
+            #expect(repeated.status != 0)
+            #expect(repeated.error.contains("already exists"))
+            #expect(try Data(contentsOf: templateFile) == printed.output)
+            #expect(try String(contentsOf: directory.appendingPathComponent("openever.json"), encoding: .utf8)
+                    == "{\"liteclient\":{\"ip\":\"192.0.2.1\"}}")
+        }
+    }
+
+    @Test(arguments: [[], ["--read", "--path"], ["--create", "--read"], ["--create", "--path"],
+                      ["--read", "--create", "--path"], ["--out", "file"],
+                      ["--read", "--out", "file"], ["--path", "--out", "file"]])
+    func invalidConfigModesAreRejected(_ arguments: [String]) throws {
+        #expect(throws: (any Error).self) { try ConfigCommand.parse(arguments) }
     }
 
     @Test func globalConfigurationStillSupportsSelectionAndOverrides() throws {
@@ -405,6 +511,29 @@ struct CLITests {
         }
         await client.close()
     }
+}
+
+private func runConfigCLI(_ arguments: [String], directory: URL, environment: [String: String] = [:]) throws
+    -> (status: Int32, output: Data, error: String) {
+    let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    let process = Process()
+    process.executableURL = root.appendingPathComponent(".build/debug/openever")
+    process.currentDirectoryURL = directory
+    var variables = ProcessInfo.processInfo.environment
+    for name in ["OPENEVER_CONFIG", "OpenEver_CONFIG", "OPENEVER_LITE_HOST", "OPENEVER_LITE_PORT", "OPENEVER_LITE_PUBLIC_KEY"] {
+        variables.removeValue(forKey: name)
+    }
+    variables.merge(environment) { _, selected in selected }
+    process.environment = variables
+    process.arguments = arguments
+    let output = Pipe(), error = Pipe()
+    process.standardOutput = output
+    process.standardError = error
+    try process.run()
+    process.waitUntilExit()
+    return (process.terminationStatus,
+            try output.fileHandleForReading.readToEnd() ?? Data(),
+            String(decoding: try error.fileHandleForReading.readToEnd() ?? Data(), as: UTF8.self))
 }
 
 private func withConfiguration(_ json: String, _ operation: (URL) throws -> Void) throws {
