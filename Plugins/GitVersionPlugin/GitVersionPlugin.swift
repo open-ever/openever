@@ -6,10 +6,9 @@ struct GitVersionPlugin: BuildToolPlugin {
     func createBuildCommands(context: PluginContext, target: Target) throws -> [Command] {
         let outputDirectory = context.pluginWorkDirectoryURL.appendingPathComponent("Generated")
         let packageDirectory = context.package.directoryURL
-        let script = packageDirectory.appendingPathComponent("Plugins/GitVersionPlugin/generate-version.sh")
         let fileManager = FileManager.default
         var inputFiles = [packageDirectory]
-        for path in [".git", ".git/HEAD", ".git/index", ".git/packed-refs", ".git/logs/HEAD",
+        for path in [".git", ".git/HEAD", ".git/index", ".git/config", ".git/packed-refs", ".git/logs/HEAD",
                      ".git/refs", ".git/refs/heads", ".git/refs/tags"] {
             let url = packageDirectory.appendingPathComponent(path)
             if fileManager.fileExists(atPath: url.path) {
@@ -25,9 +24,8 @@ struct GitVersionPlugin: BuildToolPlugin {
                 }
             }
         }
-        let executable = URL(fileURLWithPath: "/bin/sh")
+        let executable = try context.tool(named: "GitVersionGenerator").url
         let arguments = [
-            script.path,
             packageDirectory.path,
             outputDirectory.path
         ]
