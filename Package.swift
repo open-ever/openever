@@ -35,6 +35,6 @@ let package = Package(
             .product(name: "NIOCore", package: "swift-nio"),
             .product(name: "NIOPosix", package: "swift-nio")
         ]),
-        .plugin(name: "GitVersionPlugin", capability: .buildTool())
+        .plugin(name: "GitVersionPlugin", capability: .buildTool(), exclude: ["generate-version.sh"])
     ]
 )
